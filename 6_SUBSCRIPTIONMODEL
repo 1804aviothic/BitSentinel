@@ -1,0 +1,97 @@
+#!/bin/bash
+
+SUBSCRIPTION_FILE="$HOME/subscriptions.json"
+SUBSCRIBED_BLOGS_DIR="$HOME/subscribed_blogs"
+
+mkdir -p "$SUBSCRIBED_BLOGS_DIR"
+
+load_subscriptions() {
+    if [[ -f "$SUBSCRIPTION_FILE" ]]; then
+        cat "$SUBSCRIPTION_FILE"
+    else
+        echo "{}"
+    fi
+}
+save_subscriptions() {
+    echo "$1" > "$SUBSCRIPTION_FILE"
+}
+
+subscribe_user() {
+    local user="$1"
+    local author="$2"
+    local subscriptions
+    subscriptions=$(load_subscriptions)
+
+    if [[ $(echo "$subscriptions" | jq -r --arg user "$user" '.[$user]') == "null" ]]; then
+        subscriptions=$(echo "$subscriptions" | jq --arg user "$user" '. + {($user): []}')
+    fi
+
+  
+    if ! echo "$subscriptions" | jq -e --arg user "$user" --arg author "$author" '.[$user] | index($author)' > /dev/null; then
+        subscriptions=$(echo "$subscriptions" | jq --arg user "$user" --arg author "$author" '.[$user] += [$author]')
+        save_subscriptions "$subscriptions"
+        create_symlink "$user" "$author"
+        echo "User  '$user' subscribed to author '$author'."
+    else
+        echo "User  '$user' is already subscribed to author '$author'."
+    fi
+}
+create_symlink() {
+    local user="$1"
+    local author="$2"
+    local author_dir="$HOME/$author"
+    local symlink_path="$SUBSCRIBED_BLOGS_DIR/$author"
+
+    if [[ ! -L "$symlink_path" ]]; then
+        ln -s "$author_dir" "$symlink_path"
+        echo "Created symlink for author '$author' in '$SUBSCRIBED_BLOGS_DIR'."
+    fi
+}
+
+publish_article() {
+    local author="$1"
+    local title="$2"
+    local content="$3"
+    local subscribers_only="$4"
+    local article_type="public"
+    local article_dir="$HOME/$author"
+
+    mkdir -p "$article_dir"
+    if [[ "$subscribers_only" == "true" ]]; then
+        article_type="subscribers_only"
+    fi
+
+    echo "$content" > "$article_dir/$title.txt"
+    echo "Article '$title' published as $article_type."
+}
+
+notify_subs() {
+    local author="$1"
+    local title="$2"
+    local subscribers_only="$3"
+    local subscriptions
+    subscriptions=$(load_subscriptions)
+
+    for user in $(echo "$subscriptions" | jq -r --arg author "$author" '. | to_entries[] | select(.value | index($author)) | .key'); do
+        if [[ "$subscribers_only" == "true" ]]; then
+            echo "Notifying $user of new subscribers-only article '$title' from $author."
+        else
+            echo "Notifying $user of new public article '$title' from $author."
+        fi
+    done
+}
+
+case "$1" in
+    subscribe)
+        subscribe_user "$2" "$3"
+        ;;
+    publish)
+        publish_article "$2" "$3" "$4" "$5"
+        notify_subscribers "$2" "$3" "$5"
+        ;;
+    *)
+        echo "Usage: $0 {subscribe|publish} [args]"
+        echo "  subscribe <user> <author>"
+        echo "  publish <author> <title> <content> <subscribers_only (true|false)>"
+        ;;
+esac
