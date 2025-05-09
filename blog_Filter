@@ -1,0 +1,86 @@
+#!/bin/bash
+
+
+MODS_HOME="$HOME/mods"
+BLACKLIST_FILE="$MODS_HOME/blacklist.txt"
+PUBLIC_DIR="$HOME/authors/*/public"
+BLOGS_YAML_SUFFIX="blogs.yaml"
+
+
+load_blacklist() {
+    if [[ ! -f "$BLACKLIST_FILE" ]]; then
+        echo "Blacklist file not found at $BLACKLIST_FILE."
+        exit 1
+    fi
+    mapfile -t blacklist < "$BLACKLIST_FILE"
+}
+
+
+censor_article() {
+    local article="$1"
+    local blog_name=$(basename "$article")
+    local line_no=0
+    local total_blacklisted=0
+    local mod_comments=""
+
+    while IFS= read -r line; do
+        ((line_no++))
+        for word in "${blacklist[@]}"; do
+           
+            if [[ "$line" =~ [[:<:]]${word}[[:>:]] ]]; then
+                local count=$(grep -oi "${word}" <<< "$line" | wc -l)
+                total_blacklisted=$((total_blacklisted + count))
+                mod_comments="found $total_blacklisted blacklisted words"
+                line=${line//${word}/$(printf '*%.0s' $(seq 1 ${#word}))}  # Replace with asterisks
+                echo "Found blacklisted word '$word' in '$blog_name' at line $line_no."
+            fi
+        done
+        echo "$line" >> "$article.tmp"  # Write the censored line to a temporary file
+    done < "$article"
+
+    mv "$article.tmp" "$article"
+
+    
+    if [[ $total_blacklisted -gt 5 ]]; then
+        archive_blog "$blog_name" "$mod_comments"
+    fi
+}
+archive_blog() {
+    local blog_name="$1"
+    local mod_comments="$2"
+    local author_dir=$(dirname "$blog_name")
+    local archive_dir="$author_dir/archived"
+
+   
+    mkdir -p "$archive_dir"
+
+   
+    mv "$blog_name" "$archive_dir/"
+    echo "Blog '$blog_name' is archived due to excessive blacklisted words."
+
+    update_blogs_yaml "$author_dir" "$mod_comments"
+}
+
+
+update_blogs_yaml() {
+    local author_dir="$1"
+    local mod_comments="$2"
+    local blogs_yaml="$author_dir/$BLOGS_YAML_SUFFIX"
+
+    if [[ -f "$blogs_yaml" ]]; then
+       
+        yq eval -i ".articles[] | select(.filename == \"$(basename "$blog_name")\").publish_status = false" "$blogs_yaml"
+        yq eval -i ".articles[] | select(.filename == \"$(basename "$blog_name\")\").mod_comments = \"$mod_comments\"" "$blogs_yaml"
+    fi
+}
+
+load_blacklist
+
+
+for article in $PUBLIC_DIR/*; do
+    if [[ -f "$article" ]]; then
+        censor_article "$article"
+    fi
+done
+
+echo "Censorship process completed."
