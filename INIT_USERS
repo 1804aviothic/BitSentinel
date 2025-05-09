@@ -1,0 +1,115 @@
+#!/bin/bash
+
+
+USERS_YAML="users.yaml"
+USERS_DIR="/home/users"
+AUTHORS_DIR="/home/authors"
+MODS_DIR="/home/mods"
+ADMIN_DIR="/home/admin"
+GROUP_USER="g_user"
+GROUP_AUTHOR="g_author"
+GROUP_MOD="g_mod"
+GROUP_ADMIN="g_admin"
+
+create_user() {
+    local username="$1"
+    local group="$2"
+    local home_dir="$3"
+
+
+    useradd -m -d "$home_dir" -s /bin/bash -G "$group" "$username"
+    echo "User  '$username' created with home directory '$home_dir'."
+
+    
+    chown "$username:$group" "$home_dir"
+    chmod 700 "$home_dir"
+}
+
+create_author_directories() {
+    local username="$1"
+    local author_dir="$AUTHORS_DIR/$username"
+
+    mkdir -p "$author_dir/blogs"
+    mkdir -p "$author_dir/public"
+    chown "$username:$GROUP_AUTHOR" "$author_dir" "$author_dir/blogs" "$author_dir/public"
+    chmod 700 "$author_dir"
+    chmod 700 "$author_dir/blogs"
+    chmod 700 "$author_dir/public"
+}
+
+
+create_symlink_for_users() {
+    local username="$1"
+    local all_blogs_dir="$USERS_DIR/$username/all_blogs"
+
+    mkdir -p "$all_blogs_dir"
+    chown "$username:$GROUP_USER" "$all_blogs_dir"
+    chmod 755 "$all_blogs_dir"
+
+    # Create symlinks to authors' public directories
+    for author in $(yq eval '.authors[]' "$USERS_YAML"); do
+        ln -s "$AUTHORS_DIR/$author/public" "$all_blogs_dir/$author"
+    done
+}
+
+update_moderator_symlinks() {
+    local username="$1"
+    local assigned_authors=($(yq eval ".moderators[] | select(.username == \"$username\").authors[]" "$USERS_YAML"))
+
+    local mods_dir="$MODS_DIR/$username/public"
+    mkdir -p "$mods_dir"
+    chown "$username:$GROUP_MOD" "$mods_dir"
+    chmod 770 "$mods_dir"
+
+    rm -f "$mods_dir/*"
+
+   
+    for author in "${assigned_authors[@]}"; do
+        ln -s "$AUTHORS_DIR/$author/public" "$mods_dir/$author"
+    done
+}
+
+revoke_user_access() {
+    local username="$1"
+    usermod -L "$username"  # Lock the user account
+    echo "Access revoked for user '$username'."
+}
+
+
+process_yaml() {
+  
+    for group in "$GROUP_USER" "$GROUP_AUTHOR" "$GROUP_MOD" "$GROUP_ADMIN"; do
+        if ! getent group "$group" > /dev/null; then
+            groupadd "$group"
+            echo "Group '$group' created."
+        fi
+    done
+
+    for user in $(yq eval '.users[]' "$USERS_YAML"); do
+        create_user "$user" "$GROUP_USER" "$USERS_DIR/$user"
+        create_symlink_for_users "$user"
+    done
+
+    for author in $(yq eval '.authors[]' "$USERS_YAML"); do
+        create_user "$author" "$GROUP_AUTHOR" "$AUTHORS_DIR/$author"
+        create_author_directories "$author"
+    done
+
+    for mod in $(yq eval '.moderators[] | .username' "$USERS_YAML"); do
+        create_user "$mod" "$GROUP_MOD" "$MODS_DIR/$mod"
+        update_moderator_symlinks "$mod"
+    done
+
+    
+    for user in $(yq eval '.removed[]' "$USERS_YAML"); do
+        revoke_user_access "$user"
+    done
+}
+
+if [[ ! -f "$USERS_YAML" ]]; then
+    echo "Configuration file '$USERS_YAML' not found."
+    exit 1
+fi
+
+process_yaml
+echo "User  creation and directory structuring completed."
