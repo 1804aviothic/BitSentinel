@@ -1,0 +1,95 @@
+#!/bin/bash
+
+# Constants
+REQUESTS_FILE="/path/to/admin/requests.yaml"
+AUTHORS_DIR="/home/authors"
+ALL_BLOGS_DIR="/path/to/all_blogs"
+GROUP_NAME="g_author"
+
+
+request_author() {
+    local user="$1"
+    
+    # Check if the user already has a request
+    if grep -q "$user" "$REQUESTS_FILE"; then
+        echo "You have already requested to become an author."
+        return
+    fi
+
+
+    echo "- $user" >> "$REQUESTS_FILE"
+    echo "Request to become an author submitted."
+}
+
+list_requests() {
+    echo "Pending author requests:"
+    cat "$REQUESTS_FILE"
+}
+
+
+approve_request() {
+    local user="$1"
+
+    # Check if the request exists
+    if ! grep -q "$user" "$REQUESTS_FILE"; then
+        echo "No pending request found for user '$user'."
+        return
+    fi
+
+    if [[ -d "/home/$user" ]]; then
+        mv "/home/$user" "$AUTHORS_DIR/"
+        echo "Moved user directory to $AUTHORS_DIR/$user."
+    else
+        echo "User  directory for '$user' does not exist."
+        return
+    fi
+
+
+    usermod -aG "$GROUP_NAME" "$user"
+    echo "Updated group for user '$user' to '$GROUP_NAME'."
+
+    
+    mkdir -p "$AUTHORS_DIR/$user/blogs"
+    mkdir -p "$AUTHORS_DIR/$user/public"
+    echo "Created blogs and public directories for '$user'."
+
+ 
+    ln -s "$AUTHORS_DIR/$user/public" "$ALL_BLOGS_DIR/$user"
+    echo "Created symlink for '$user' in $ALL_BLOGS_DIR."
+
+    sed -i "/$user/d" "$REQUESTS_FILE"
+    echo "Request for '$user' approved and removed from requests."
+}
+
+reject_request() {
+    local user="$1"
+
+    # Check if the request exists
+    if ! grep -q "$user" "$REQUESTS_FILE"; then
+        echo "No pending request found for user '$user'."
+        return
+    fi
+
+    # Remove the request from requests.yaml
+    sed -i "/$user/d" "$REQUESTS_FILE"
+    echo "Request for '$user' rejected and removed from requests."
+}
+
+
+case "$1" in
+    request)
+        request_author "$2"
+        ;;
+    list)
+        list_requests
+        ;;
+    approve)
+        approve_request "$2"
+        ;;
+    reject)
+        reject_request "$2"
+        ;;
+    *)
+        echo "Usage: $0 {request <username>|list|approve <username>|reject <username>}"
+        ;;
+esac
