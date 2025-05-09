@@ -1,0 +1,82 @@
+#!/bin/bash
+
+
+USER_PREF_FILE="userpref.yaml"
+FYI_FILE_SUFFIX="FYI.yaml"
+USERS_DIR="$HOME/users"
+BLOGS_DIR="$HOME/authors"
+
+load_user_preferences() {
+  
+    declare -A user_preferences
+    while IFS= read -r line; do
+        local user=$(echo "$line" | yq eval '.username' -)
+        local preferences=$(echo "$line" | yq eval '.preferences[]' - | tr '\n' ',' | sed 's/,$//')
+        user_preferences["$user"]="$preferences"
+    done < <(yq eval '.users[]' "$USER_PREF_FILE")
+    echo "${user_preferences[@]}"
+}
+
+
+load_blogs() {
+    declare -A blogs
+    for blog in "$BLOGS_DIR"/*; do
+        if [[ -d "$blog" ]]; then
+            local blog_name=$(basename "$blog")
+            local tags=$(yq eval ".articles[] | select(.filename == \"$blog_name\").tags[]" "$blog/$BLOGS_YAML_SUFFIX" | tr '\n' ',' | sed 's/,$//')
+            blogs["$blog_name"]="$tags"
+        fi
+    done
+    echo "${blogs[@]}"
+}
+assign_blogs() {
+    local -n user_preferences=$1
+    local -n blogs=$2
+
+
+    declare -A blog_assignments
+    for blog in "${!blogs[@]}"; do
+        blog_assignments["$blog"]=0  # Initialize count of assignments
+    done
+
+    for user in "${!user_preferences[@]}"; do
+        local preferences=(${user_preferences["$user"]//,/ })
+        local assigned_blogs=()
+        
+        for pref in "${preferences[@]}"; do
+            for blog in "${!blogs[@]}"; do
+                if [[ "${blogs[$blog]}" == *"$pref"* && ! " ${assigned_blogs[@]} " =~ " $blog " ]]; then
+                    assigned_blogs+=("$blog")
+                    blog_assignments["$blog"]=$((blog_assignments["$blog"] + 1))
+                    if [[ ${#assigned_blogs[@]} -eq 3 ]]; then
+                        break 2  # Stop if 3 blogs are assigned
+                    fi
+                fi
+            done
+        done
+
+        local fyi_file="$USERS_DIR/$user/$FYI_FILE_SUFFIX"
+        echo "blogs:" > "$fyi_file"
+        for blog in "${assigned_blogs[@]}"; do
+            echo "  - $blog" >> "$fyi_file"
+        done
+    done
+}
+
+
+if [[ $EUID -ne 0 ]]; then
+    echo "This script must be run as admin."
+    exit 1
+fi
+
+
+declare -A user_preferences
+declare -A blogs
+
+user_preferences=($(load_user_preferences))
+blogs=($(load_blogs))
+
+
+assign_blogs user_preferences blogs
+
+echo "Blog assignments completed successfully."
