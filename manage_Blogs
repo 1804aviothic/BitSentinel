@@ -1,0 +1,121 @@
+#!/bin/bash
+
+
+BLOGS_DIR="$HOME/blogs"
+PUBLIC_DIR="$HOME/public"
+BLOGS_YAML="$HOME/blogs.yaml"
+
+
+publish_article() {
+    local filename="$1"
+    local article_path="$BLOGS_DIR/$filename"
+    
+
+    if [[ ! -f "$article_path" ]]; then
+        echo "Article '$filename' does not exist."
+        return
+    fi
+
+  
+    echo "Select categories (e.g., 2,1 for Cinema and Sports):"
+    select category in $(yq eval '.categories[]' "$BLOGS_YAML"); do
+        if [[ -n "$category" ]]; then
+            break
+        fi
+    done
+
+    yq eval -i ".articles += [{filename: \"$filename\", categories: [\"$category\"]}]" "$BLOGS_YAML"
+
+   
+    ln -s "$article_path" "$PUBLIC_DIR/$filename"
+    chmod 755 "$PUBLIC_DIR/$filename"
+    echo "Article '$filename' published and accessible in the public directory."
+}
+
+archive_article() {
+    local filename="$1"
+    local public_path="$PUBLIC_DIR/$filename"
+
+    
+    if [[ ! -L "$public_path" ]]; then
+        echo "Article '$filename' is not published."
+        return
+
+    rm "$public_path"
+
+   
+    chmod 700 "$public_path"
+
+    yq eval -i "del(.articles[] | select(.filename == \"$filename\"))" "$BLOGS_YAML"
+    echo "Article '$filename' archived."
+}
+
+
+delete_article() {
+    local filename="$1"
+    local article_path="$BLOGS_DIR/$filename"
+    local public_path="$PUBLIC_DIR/$filename"
+
+   
+    if [[ ! -f "$article_path" ]]; then
+        echo "Article '$filename' does not exist."
+        return
+    fi
+
+  
+    if [[ -L "$public_path" ]]; then
+        rm "$public_path"
+    fi
+
+
+    rm "$article_path"
+
+   
+    yq eval -i "del(.articles[] | select(.filename == \"$filename\"))" "$BLOGS_YAML"
+    echo "Article '$filename' deleted."
+}
+
+edit_article() {
+    local filename="$1"
+
+   
+    if ! yq eval ".articles[] | select(.filename == \"$filename\")" "$BLOGS_YAML" > /dev/null; then
+        echo "Article '$filename' does not exist in the YAML file."
+        return
+    fi
+
+
+    echo "Current categories for '$filename':"
+    yq eval ".articles[] | select(.filename == \"$filename\") | .categories[]" "$BLOGS_YAML"
+
+    
+    echo "Select new categories (e.g., 2,1 for Cinema and Sports):"
+    select new_category in $(yq eval '.categories[]' "$BLOGS_YAML"); do
+        if [[ -n "$new_category" ]]; then
+            break
+        fi
+    done
+
+  
+    yq eval -i "(.articles[] | select(.filename == \"$filename\").categories) = [\"$new_category\"]" "$BLOGS_YAML"
+    echo "Categories for '$filename' updated."
+}
+
+
+case "$1" in
+    -p)
+        publish_article "$2"
+        ;;
+    -a)
+        archive_article "$2"
+        ;;
+    -d)
+        delete_article "$2"
+        ;;
+    -e)
+        edit_article "$2"
+        ;;
+    *)
+        echo "Usage: $0 {-p <filename>|-a <filename>|-d <filename>|-e <filename>}"
+        ;;
+esac
