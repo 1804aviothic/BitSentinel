@@ -1,0 +1,74 @@
+#!/bin/bash
+
+AUTHORS_DIR="$HOME/authors"
+REPORT_FILE="$HOME/admin/blog_activity_report.txt"
+BLOGS_YAML_SUFFIX="blogs.yaml"
+READS_FILE_SUFFIX="reads.txt"
+
+generate_report() {
+    echo "Blog Activity Report" > "$REPORT_FILE"
+    echo "Generated on: $(date)" >> "$REPORT_FILE"
+    echo "" >> "$REPORT_FILE"
+
+    
+    declare -A published_count
+    declare -A deleted_count
+    declare -A read_count
+
+    
+    for author_dir in "$AUTHORS_DIR"/*; do
+        if [[ -d "$author_dir" ]]; then
+            local author_name=$(basename "$author_dir")
+            local blogs_yaml="$author_dir/$BLOGS_YAML_SUFFIX"
+
+            if [[ -f "$blogs_yaml" ]]; then
+               
+                local published_articles=$(yq eval '.articles[] | select(.publish_status == true)' "$blogs_yaml" | wc -l)
+                local deleted_articles=$(yq eval '.articles[] | select(.publish_status == false)' "$blogs_yaml" | wc -l)
+
+              
+                for tag in $(yq eval '.articles[].tags[]' "$blogs_yaml" | sort | uniq); do
+                    published_count["$tag"]=$((published_count["$tag"] + published_articles))
+                    deleted_count["$tag"]=$((deleted_count["$tag"] + deleted_articles))
+                done
+
+               
+                local reads_file="$author_dir/$READS_FILE_SUFFIX"
+                if [[ -f "$reads_file" ]]; then
+                    while IFS= read -r line; do
+                        local article_name=$(echo "$line" | cut -d':' -f1)
+                        local read_count_value=$(echo "$line" | cut -d':' -f2)
+                        read_count["$article_name"]=$((read_count["$article_name"] + read_count_value))
+                    done < "$reads_file"
+                fi
+            fi
+        fi
+    done
+
+    echo "Published Articles by Tag:" >> "$REPORT_FILE"
+    for tag in "${!published_count[@]}"; do
+        echo "  - $tag: ${published_count[$tag]}" >> "$REPORT_FILE"
+    done
+
+    echo "" >> "$REPORT_FILE"
+    echo "Deleted Articles by Tag:" >> "$REPORT_FILE"
+    for tag in "${!deleted_count[@]}"; do
+        echo "  - $tag: ${deleted_count[$tag]}" >> "$REPORT_FILE"
+    done
+
+    echo "" >> "$REPORT_FILE"
+    echo "Top 3 Most Read Articles:" >> "$REPORT_FILE"
+    for article in $(printf "%s\n" "${!read_count[@]}" | sort -nr -k2 | head -n 3); do
+        echo "  - $article: ${read_count[$article]} reads" >> "$REPORT_FILE"
+    done
+
+    echo "Report generated successfully at $REPORT_FILE."
+}
+
+
+if [[ $EUID -ne 0 ]]; then
+    echo "This script must be run as admin."
+    exit 1
+fi
+
+generate_report
