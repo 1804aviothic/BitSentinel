@@ -1,0 +1,71 @@
+#!/bin/bash
+
+NOTIFICATION_LOG="$HOME/notifications.log"
+SERVER_PORT=12345
+SERVER_IP="localhost"
+
+send_notification() {
+    local message="$1"
+    echo "$message" | nc -w 1 "$SERVER_IP" "$SERVER_PORT"
+}
+
+receive_notifications() {
+    nc -l -p "$SERVER_PORT" -q 1 >> "$NOTIFICATION_LOG"
+}
+
+display_notifications() {
+    if [[ -f "$NOTIFICATION_LOG" ]]; then
+        echo "You have the following notifications:"
+        grep -A 1 "new_notifications" "$NOTIFICATION_LOG" | grep -v "new_notifications"
+    else
+        echo "No notifications found."
+    fi
+}
+
+check_new_notifications() {
+    if [[ -f "$NOTIFICATION_LOG" ]]; then
+        local unread_count=$(grep -c "new_notifications" "$NOTIFICATION_LOG")
+        if [[ $unread_count -gt 0 ]]; then
+            echo "You have $unread_count unread notifications."
+        fi
+    fi
+}
+
+mark_notifications_as_read() {
+    if [[ -f "$NOTIFICATION_LOG" ]]; then
+        sed -i '/new_notifications/!b;n;s/^/#/' "$NOTIFICATION_LOG"b;n;sfi
+}
+
+publish_article() {
+    local author="$1"
+    local title="$2"
+    local content="$3"
+    local notification_message="New article published by $author: $title"
+
+    echo "$content" > "$HOME/$author/$title.txt"
+"$notification_message"
+    echo "new_notifications" >> "$NOTIFICATION_LOG"
+}
+
+
+case "$1" in
+    send)
+        # Start the notification server in the background
+        receive_notifications &
+        ;;
+    publish)
+        publish_article "$2" "$3" "$4"
+        ;;
+    display)
+        display_notifications
+        ;;
+    check)
+        check_new_notifications
+        ;;
+    mark)
+        mark_notifications_as_read
+        ;;
+    *)
+        echo "Usage: $0 {send|publish <author> <title> <content>|display|check|mark}"
+        ;;
+esac
